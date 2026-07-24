@@ -1,41 +1,60 @@
 """
-Rol tekshiruvi uchun decorator. Har bir admin/mentor/owner-only handler
-funksiyasi ustiga qo'yiladi:
+Rol tekshiruvi. Ikki xil ehtiyoj bor:
 
-    @require_role(Role.ADMIN, Role.SUPER_ADMIN)
-    def handle_admin_users(message_or_call, user):
-        ...
+1. `user_has_role(user, *roles)` — MENYU ko'rsatish uchun: "bu userda umuman
+   shu rol bormi, qaysi guruhda bo'lishidan qat'iy nazar" (masalan "🛠 Admin
+   Panel" tugmasini ko'rsatish/ko'rsatmaslik).
+2. `require_role(*roles)` decorator — AMALNI BAJARISHDAN OLDIN qat'iy tekshirish
+   uchun (global rollar: Admin/Super Admin har doim global bo'ladi).
 
-Guruhga xos rol tekshiruvi uchun (masalan "shu guruhning mentorimi") group_id
-parametri beriladi — shunda faqat o'sha guruh doirasidagi rol tekshiriladi.
+Guruhga xos rollar (Mentor/Group Owner) uchun alohida `user_has_group_role()`
+funksiyasi ishlatiladi — chunki ular faqat ma'lum bitta guruh doirasida amal qiladi.
 """
 import functools
 
 from apps.users.models import Role, UserRole
 
 
-def user_has_role(user, *role_names, group=None) -> bool:
-    qs = UserRole.objects.filter(user=user, role__name__in=role_names)
-    if group is not None:
-        qs = qs.filter(group=group) | qs.filter(group__isnull=True, role__name=Role.SUPER_ADMIN)
-    else:
-        qs = qs.filter(group__isnull=True)
-    return qs.exists()
+def user_has_role(user, *role_names) -> bool:
+    """Foydalanuvchida shu rollardan biri bor-yo'qligini tekshiradi
+    (guruh doirasidan qat'iy nazar — menyu ko'rsatish uchun ishlatiladi)."""
+    return UserRole.objects.filter(user=user, role__name__in=role_names).exists()
 
 
-def require_role(*role_names, group_param: str = None):
+def user_has_group_role(user, group, *role_names) -> bool:
+    """Foydalanuvchi aynan shu guruhda shu rollardan biriga egami.
+    Super Admin har qanday guruhda ham avtomatik ruxsatga ega."""
+    if UserRole.objects.filter(user=user, role__name=Role.SUPER_ADMIN, group__isnull=True).exists():
+        return True
+    return UserRole.objects.filter(user=user, role__name__in=role_names, group=group).exists()
+
+
+def require_role(*role_names):
     """
-    group_param berilsa, wrapped funksiya kwargs'idan shu nomdagi Group obyektini
-    olib, faqat o'sha guruh doirasidagi rolni tekshiradi (masalan mentor tekshiruvi).
+    Global rollar (Admin, Super Admin) uchun. Handler funksiyalar botda doim
+    `(bot, call_or_message, user, ...)` tartibida chaqiriladi — decorator ham
+    shu tartibga mos.
     """
     def decorator(handler_func):
         @functools.wraps(handler_func)
-        def wrapper(update, user, *args, **kwargs):
-            group = kwargs.get(group_param) if group_param else None
-            if not user_has_role(user, *role_names, group=group):
-                # Bot javobi handler darajasida yuboriladi — bu yerda faqat bloklaymiz
-                from bot.utils.formatters import PRIORITY_EMOJI  # noqa: F401 (import chegarasi uchun misol)
+        def wrapper(bot, update, user, *args, **kwargs):
+            if not user_has_role(user, *role_names):
                 raise PermissionError("Bu amal uchun sizda yetarli huquq yo'q.")
-            return handler_func(update, user, *args, **kwargs)
+            return handler_func(bot, update, user, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def require_group_role(*role_names):
+    """
+    Guruhga xos rollar uchun. Wrapped funksiya kwargs orqali `group=` obyektini
+    o'zi uzatishi kerak (masalan mentor-only guruh sozlamalari)."""
+    def decorator(handler_func):
+        @functools.wraps(handler_func)
+        def wrapper(bot, update, user, *args, **kwargs):
+            group = kwargs.get("group")
+            if group is None or not user_has_group_role(user, group, *role_names):
+                raise PermissionError("Bu amal uchun sizda yetarli huquq yo'q.")
+            return handler_func(bot, update, user, *args, **kwargs)
         return wrapper
     return decorator

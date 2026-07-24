@@ -43,22 +43,23 @@ def handle_start(bot, message):
         bot.send_message(message.chat.id, "🚫 Siz bloklangansiz. Savol bo'lsa, admin bilan bog'laning.")
         return
 
+    # Eslatma: "🛠 Admin Panel" tugmasi faqat GLOBAL Admin/Super Admin uchun ko'rsatiladi.
+    # Mentor/Group Owner o'z guruhini "Groups -> guruh -> ⚙️ Sozlamalar" orqali boshqaradi —
+    # ular uchun bu tugmani ko'rsatish "ruxsat yo'q" xatosiga olib kelardi (tuzatildi).
     is_admin = user_has_role(user, Role.ADMIN, Role.SUPER_ADMIN)
-    is_mentor_owner = user_has_role(user, Role.MENTOR, Role.GROUP_OWNER)
 
     bot.send_message(
         message.chat.id,
         render_dashboard_text(user),
-        reply_markup=main_dashboard_kb(is_admin=is_admin, is_mentor_or_owner=is_mentor_owner),
+        reply_markup=main_dashboard_kb(is_admin=is_admin),
     )
 
 
 def handle_dashboard_callback(bot, call, user):
     is_admin = user_has_role(user, Role.ADMIN, Role.SUPER_ADMIN)
-    is_mentor_owner = user_has_role(user, Role.MENTOR, Role.GROUP_OWNER)
     bot.edit_message_text(
         render_dashboard_text(user),
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        reply_markup=main_dashboard_kb(is_admin=is_admin, is_mentor_or_owner=is_mentor_owner),
+        reply_markup=main_dashboard_kb(is_admin=is_admin),
     )

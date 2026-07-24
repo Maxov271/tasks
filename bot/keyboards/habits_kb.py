@@ -15,3 +15,11 @@ def habits_menu_kb() -> types.InlineKeyboardMarkup:
     )
     kb.add(back_button("dashboard"))
     return kb
+
+
+def habit_delete_list_kb(habits) -> types.InlineKeyboardMarkup:
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    for h in habits:
+        kb.add(types.InlineKeyboardButton(f"🗑 {h.icon_emoji} {h.name}", callback_data=build("habit", "delete", h.id)))
+    kb.add(back_button("habit:menu"))
+    return kb

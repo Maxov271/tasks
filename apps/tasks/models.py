@@ -192,3 +192,22 @@ class HabitLog(models.Model):
 
     def __str__(self):
         return f"{self.habit} @ {self.date}"
+
+
+# ---------------------------------------------------------------------------
+# Focus / Pomodoro
+# ---------------------------------------------------------------------------
+
+class PomodoroSession(models.Model):
+    user = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="pomodoro_sessions")
+    duration_minutes = models.PositiveSmallIntegerField(default=25)
+    started_at = models.DateTimeField(auto_now_add=True)
+    stopped_at = models.DateTimeField(null=True, blank=True)
+    is_completed = models.BooleanField(default=False, help_text="To'liq davomida to'xtatilmagan bo'lsa True")
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [models.Index(fields=["user", "started_at"])]
+
+    def __str__(self):
+        return f"{self.user}: {self.duration_minutes} daqiqa @ {self.started_at:%d.%m %H:%M}"

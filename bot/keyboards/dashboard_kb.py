@@ -2,7 +2,7 @@ from telebot import types
 from bot.utils.callback_parser import build
 
 
-def main_dashboard_kb(is_admin: bool = False, is_mentor_or_owner: bool = False) -> types.InlineKeyboardMarkup:
+def main_dashboard_kb(is_admin: bool = False) -> types.InlineKeyboardMarkup:
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(
         types.InlineKeyboardButton("📊 Dashboard", callback_data=build("nav", "open", "dashboard")),
@@ -27,7 +27,7 @@ def main_dashboard_kb(is_admin: bool = False, is_mentor_or_owner: bool = False) 
     kb.add(
         types.InlineKeyboardButton("📅 Calendar", callback_data=build("calendar", "menu")),
     )
-    if is_admin or is_mentor_or_owner:
+    if is_admin:
         kb.add(types.InlineKeyboardButton("🛠 Admin Panel", callback_data=build("admin", "menu")))
     return kb
 

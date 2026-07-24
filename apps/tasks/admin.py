@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     Category, Task, SubTask, Reminder,
     GroupTask, TaskSubmission, TaskAttachment,
-    Habit, HabitLog,
+    Habit, HabitLog, PomodoroSession,
 )
 
 
@@ -83,3 +83,10 @@ class HabitAdmin(admin.ModelAdmin):
 class HabitLogAdmin(admin.ModelAdmin):
     list_display = ("id", "habit", "date", "is_done")
     list_filter = ("date",)
+
+
+@admin.register(PomodoroSession)
+class PomodoroSessionAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "duration_minutes", "started_at", "stopped_at", "is_completed")
+    list_filter = ("is_completed",)
+    search_fields = ("user__full_name",)

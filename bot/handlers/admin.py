@@ -1,14 +1,20 @@
 """
-Bot ichidagi tezkor Admin Panel (Django Admin'ga qo'shimcha — mobil orqali
-tezkor ban/statistika ko'rish uchun). Har bir funksiya @require_role bilan himoyalangan.
+Bot ichidagi tezkor Admin Panel. Har bir amal @require_role bilan himoyalangan
+(faqat Admin/Super Admin). Katta hajmdagi amallar (broadcast, backup) Celery
+orqali fon vazifasi sifatida bajariladi.
 """
 from django.core.paginator import Paginator
+from django.utils import timezone
 
 from apps.users.models import User, Role
+from apps.groups.models import Group
 from apps.core.models import AdminActionLog
-from bot.keyboards.admin_kb import admin_menu_kb, user_admin_actions_kb
-from bot.middlewares.role_check import require_role
+from apps.statistics.models import StatsSnapshot
+from bot.keyboards.admin_kb import admin_menu_kb, admin_users_list_kb, user_admin_actions_kb, admin_groups_list_kb
+from bot.keyboards.tasks_kb import cancel_kb
+from bot.middlewares.role_check import require_role, user_has_role
 from bot.utils.callback_parser import ParsedCallback
+from bot.states.user_states import AdminStates
 
 PAGE_SIZE = 10
 
@@ -26,12 +32,37 @@ def handle_admin_users_list(bot, call, user, cb: ParsedCallback):
     page = cb.param(0, int, 0)
     qs = User.objects.order_by("-created_at")
     page_obj = Paginator(qs, PAGE_SIZE).get_page(page + 1)
-    text = "\n".join(f"{'🚫' if u.is_banned else '✅'} {u.display_name} (id={u.id})" for u in page_obj.object_list)
     bot.edit_message_text(
-        text or "Foydalanuvchi topilmadi.",
+        f"👤 Foydalanuvchilar ({qs.count()} ta):",
         chat_id=call.message.chat.id, message_id=call.message.message_id,
-        reply_markup=admin_menu_kb(),
+        reply_markup=admin_users_list_kb(page_obj.object_list, page, page_obj.has_next()),
     )
+
+
+@require_role(Role.ADMIN, Role.SUPER_ADMIN)
+def handle_admin_user_detail(bot, call, user, cb: ParsedCallback):
+    target_id = cb.param(0, int)
+    target = User.objects.filter(id=target_id).first()
+    if not target:
+        bot.answer_callback_query(call.id, "Foydalanuvchi topilmadi.", show_alert=True)
+        return
+    text = (
+        f"👤 {target.display_name} (id={target.id})\n"
+        f"🚫 Ban: {'Ha' if target.is_banned else 'Yo\u02bbq'}\n"
+        f"⭐ Premium: {'Ha' if target.is_premium else 'Yo\u02bbq'}\n"
+        f"👥 Guruh yaratish ruxsati: {'Ha' if target.can_create_group else 'Yo\u02bbq'}"
+    )
+    bot.edit_message_text(
+        text, chat_id=call.message.chat.id, message_id=call.message.message_id,
+        reply_markup=user_admin_actions_kb(target),
+    )
+
+
+def _log_and_reply(bot, call, user, target, action, refresh_cb):
+    AdminActionLog.objects.create(
+        actor_telegram_id=user.telegram_id, action=action, target_model="User", target_id=target.id,
+    )
+    handle_admin_user_detail(bot, call, user, refresh_cb)
 
 
 @require_role(Role.ADMIN, Role.SUPER_ADMIN)
@@ -43,33 +74,129 @@ def handle_admin_ban(bot, call, user, cb: ParsedCallback):
         return
     target.is_banned = True
     target.save(update_fields=["is_banned"])
-
-    AdminActionLog.objects.create(
-        actor_telegram_id=user.telegram_id, action="ban_user",
-        target_model="User", target_id=target.id,
-    )
     bot.answer_callback_query(call.id, f"{target.display_name} ban qilindi.")
-    bot.edit_message_reply_markup(
-        chat_id=call.message.chat.id, message_id=call.message.message_id,
-        reply_markup=user_admin_actions_kb(target.id),
-    )
+    _log_and_reply(bot, call, user, target, "ban_user", cb)
 
 
-@require_role(Role.SUPER_ADMIN)
-def handle_admin_assign_admin_role(bot, call, user, cb: ParsedCallback):
-    """Faqat Super Admin boshqa foydalanuvchini Admin qila oladi."""
-    from apps.users.models import UserRole
-
+@require_role(Role.ADMIN, Role.SUPER_ADMIN)
+def handle_admin_unban(bot, call, user, cb: ParsedCallback):
     target_id = cb.param(0, int)
     target = User.objects.filter(id=target_id).first()
     if not target:
         bot.answer_callback_query(call.id, "Foydalanuvchi topilmadi.", show_alert=True)
         return
-    role, _ = Role.objects.get_or_create(name=Role.ADMIN)
-    UserRole.objects.get_or_create(user=target, role=role, group=None)
+    target.is_banned = False
+    target.save(update_fields=["is_banned"])
+    bot.answer_callback_query(call.id, f"{target.display_name} ban'dan chiqarildi.")
+    _log_and_reply(bot, call, user, target, "unban_user", cb)
 
-    AdminActionLog.objects.create(
-        actor_telegram_id=user.telegram_id, action="assign_admin_role",
-        target_model="User", target_id=target.id,
+
+@require_role(Role.ADMIN, Role.SUPER_ADMIN)
+def handle_admin_toggle_premium(bot, call, user, cb: ParsedCallback):
+    target_id = cb.param(0, int)
+    target = User.objects.filter(id=target_id).first()
+    if not target:
+        bot.answer_callback_query(call.id, "Foydalanuvchi topilmadi.", show_alert=True)
+        return
+    target.is_premium = not target.is_premium
+    target.save(update_fields=["is_premium"])
+    bot.answer_callback_query(call.id, "⭐ Premium yangilandi.")
+    _log_and_reply(bot, call, user, target, "toggle_premium", cb)
+
+
+@require_role(Role.ADMIN, Role.SUPER_ADMIN)
+def handle_admin_toggle_group_perm(bot, call, user, cb: ParsedCallback):
+    target_id = cb.param(0, int)
+    target = User.objects.filter(id=target_id).first()
+    if not target:
+        bot.answer_callback_query(call.id, "Foydalanuvchi topilmadi.", show_alert=True)
+        return
+    target.can_create_group = not target.can_create_group
+    target.save(update_fields=["can_create_group"])
+    bot.answer_callback_query(call.id, "👥 Guruh yaratish ruxsati yangilandi.")
+    _log_and_reply(bot, call, user, target, "toggle_group_permission", cb)
+
+
+@require_role(Role.ADMIN, Role.SUPER_ADMIN)
+def handle_admin_groups_list(bot, call, user, cb: ParsedCallback):
+    page = cb.param(0, int, 0)
+    qs = Group.objects.order_by("-created_at")
+    page_obj = Paginator(qs, PAGE_SIZE).get_page(page + 1)
+    bot.edit_message_text(
+        f"👥 Guruhlar ({qs.count()} ta):",
+        chat_id=call.message.chat.id, message_id=call.message.message_id,
+        reply_markup=admin_groups_list_kb(page_obj.object_list, page, page_obj.has_next()),
     )
-    bot.answer_callback_query(call.id, f"{target.display_name} endi Admin.")
+
+
+@require_role(Role.ADMIN, Role.SUPER_ADMIN)
+def handle_admin_stats(bot, call, user):
+    snapshot = StatsSnapshot.objects.filter(scope=StatsSnapshot.BOT).order_by("-generated_at").first()
+    if not snapshot:
+        text = (
+            "📊 Hali statistika snapshoti yaratilmagan.\n"
+            "Celery beat ishga tushgandan keyin har kuni avtomatik yaratiladi.\n"
+            "Hozircha jonli sonlar:\n\n"
+            f"👤 Jami userlar: {User.objects.count()}\n"
+            f"👥 Jami guruhlar: {Group.objects.count()}"
+        )
+    else:
+        d = snapshot.data
+        text = (
+            f"📊 Bot statistikasi ({snapshot.generated_at:%d.%m.%Y %H:%M}):\n\n"
+            f"👤 Jami userlar: {d.get('total_users', '—')}\n"
+            f"🆕 Bugun qo'shilgan: {d.get('new_today', '—')}\n"
+            f"🟢 Bugun faol: {d.get('active_today', '—')}\n"
+            f"✅ Bugun bajarilgan vazifalar: {d.get('tasks_done_today', '—')}\n"
+            f"👥 Jami faol guruhlar: {d.get('total_groups', '—')}"
+        )
+    bot.edit_message_text(
+        text, chat_id=call.message.chat.id, message_id=call.message.message_id,
+        reply_markup=admin_menu_kb(),
+    )
+
+
+@require_role(Role.SUPER_ADMIN)
+def handle_admin_backup(bot, call, user):
+    """Faqat Super Admin — zudlik bilan backup ishga tushiradi (Celery orqali fon vazifasi sifatida)."""
+    try:
+        from tasks_celery.backups import run_daily_backup
+        run_daily_backup.delay()
+        text = "💾 Backup fon vazifasi navbatga qo'yildi (Celery worker orqali bajariladi)."
+    except Exception:
+        text = "⚠️ Celery worker ishlamayapti. Backup uchun 'celery -A tasks_celery.celery_app worker' ishga tushirilganini tekshiring."
+    bot.answer_callback_query(call.id, "Backup so'rovi yuborildi.")
+    bot.edit_message_text(
+        text, chat_id=call.message.chat.id, message_id=call.message.message_id,
+        reply_markup=admin_menu_kb(),
+    )
+
+
+@require_role(Role.ADMIN, Role.SUPER_ADMIN)
+def handle_admin_broadcast_start(bot, call, user, set_state):
+    set_state(user.telegram_id, AdminStates.WAITING_BROADCAST_TEXT, data={})
+    bot.edit_message_text(
+        "📢 Barcha foydalanuvchilarga yuboriladigan xabar matnini kiriting:",
+        chat_id=call.message.chat.id, message_id=call.message.message_id,
+        reply_markup=cancel_kb(),
+    )
+
+
+def handle_admin_broadcast_text_input(bot, message, user, state_data, clear_state):
+    if not user_has_role(user, Role.ADMIN, Role.SUPER_ADMIN):
+        clear_state(user.telegram_id)
+        bot.send_message(message.chat.id, "Ruxsat yo'q.")
+        return
+
+    text = message.text.strip()[:2000]
+    clear_state(user.telegram_id)
+
+    from apps.notifications.models import Notification
+    from services.notification_service import enqueue_notification
+
+    targets = User.objects.filter(is_banned=False)
+    for u in targets:
+        enqueue_notification(u, Notification.SYSTEM, f"📢 {text}", scheduled_for=timezone.now())
+
+    AdminActionLog.objects.create(actor_telegram_id=user.telegram_id, action="broadcast", details={"text": text})
+    bot.send_message(message.chat.id, f"✅ Xabar {targets.count()} foydalanuvchi uchun navbatga qo'yildi (Celery orqali yuboriladi).")

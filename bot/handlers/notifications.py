@@ -3,6 +3,7 @@ from telebot import types
 
 from apps.notifications.models import NotificationPreference
 from bot.utils.callback_parser import build
+from bot.keyboards.dashboard_kb import back_button
 
 
 PREF_LABELS = {
@@ -21,6 +22,7 @@ def notif_settings_kb(prefs: NotificationPreference) -> types.InlineKeyboardMark
     for field, label in PREF_LABELS.items():
         state = "✅" if getattr(prefs, field) else "⬜️"
         kb.add(types.InlineKeyboardButton(f"{state} {label}", callback_data=build("notif", "toggle", field)))
+    kb.add(back_button("dashboard"))
     return kb
 
 

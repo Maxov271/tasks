@@ -11,6 +11,10 @@ class TaskStates:
     WAITING_DESCRIPTION = "task:waiting_description"
     WAITING_CUSTOM_DEADLINE = "task:waiting_custom_deadline"
     WAITING_SUBTASK_TITLE = "task:waiting_subtask_title"
+    WAITING_EDIT_TITLE = "task:waiting_edit_title"
+    WAITING_EDIT_DESC = "task:waiting_edit_desc"
+    WAITING_SEARCH_QUERY = "task:waiting_search_query"
+    WAITING_CATEGORY_NAME = "task:waiting_category_name"
 
 
 class GroupStates:

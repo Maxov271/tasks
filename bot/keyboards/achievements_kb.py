@@ -25,4 +25,5 @@ def leaderboard_period_kb() -> types.InlineKeyboardMarkup:
         types.InlineKeyboardButton("Oylik", callback_data=build("ach", "leaderboard", "monthly")),
         types.InlineKeyboardButton("Umumiy", callback_data=build("ach", "leaderboard", "all_time")),
     )
+    kb.add(back_button("ach:menu"))
     return kb
