@@ -333,17 +333,22 @@ def handle_announcement_text_input(bot, message, user, state_data, clear_state):
     text = message.text.strip()[:2000]
     announcement = Announcement.objects.create(group=group, author=user, text=text)
 
-    # Barcha faol a'zolarga yuboriladi (kichik guruhlarda sinxron, katta guruhda Celery task orqali navbatga qo'yiladi)
+    # MUHIM: e'lon DARHOL, Celery'siz yuboriladi (send_now_bulk) — avvalgi versiyada
+    # bu faqat Celery navbatiga yozilardi va Celery worker ishlamasa hech kimga
+    # yetib bormasdi ("guruhga e'lon yuborish ishlamayapti" bugi shu edi).
     from apps.notifications.models import Notification
-    from services.notification_service import enqueue_notification
-    from django.utils import timezone
+    from services.notification_service import send_now_bulk
 
-    members = GroupMembership.objects.filter(group=group, is_active=True).exclude(user=user)
-    for m in members:
-        enqueue_notification(
-            m.user, Notification.ANNOUNCEMENT,
-            f"📢 {group.name}: {text}", scheduled_for=timezone.now(),
-        )
+    member_users = [
+        m.user for m in GroupMembership.objects.filter(group=group, is_active=True).exclude(user=user).select_related("user")
+    ]
+    result = send_now_bulk(bot, member_users, Notification.ANNOUNCEMENT, f"📢 {group.name}: {text}")
+
     announcement.is_sent = True
     announcement.save(update_fields=["is_sent"])
-    bot.send_message(message.chat.id, f"✅ E'lon {members.count()} a'zoga yuborish uchun navbatga qo'yildi.")
+    bot.send_message(
+        message.chat.id,
+        f"✅ E'lon yuborildi: {result['sent']} ta a'zoga yetdi"
+        + (f", {result['failed']} tasiga yetmadi (botni bloklagan bo'lishi mumkin)" if result['failed'] else "")
+        + (f", {result['skipped']} tasi bildirishnomani o'chirib qo'ygan" if result['skipped'] else "") + ".",
+    )

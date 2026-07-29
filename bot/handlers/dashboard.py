@@ -8,22 +8,41 @@ from bot.middlewares.role_check import user_has_role
 from apps.users.models import Role
 
 
+def _build_full_name(telegram_user) -> str:
+    """
+    MUHIM TUZATISH: pyTelegramBotAPI'ning types.User klassida `full_name`
+    atributi UMUMAN MAVJUD EMAS (bu faqat aiogram kutubxonasiga xos qulaylik).
+    Avvalgi kodda `telegram_user.full_name` ishlatilgani sabab, bu funksiya
+    chaqirilgan HAR BIR joyda (ya'ni deyarli har bir tugma va xabarda)
+    AttributeError xatoligi yuzaga kelardi. Shu yerda first_name + last_name'dan
+    qo'lda yig'ib olinadi.
+    """
+    first = getattr(telegram_user, "first_name", "") or ""
+    last = getattr(telegram_user, "last_name", "") or ""
+    full = f"{first} {last}".strip()
+    return full or "Foydalanuvchi"
+
+
 def get_or_create_user(telegram_user) -> User:
     user, created = User.objects.get_or_create(
         telegram_id=telegram_user.id,
         defaults={
             "username": telegram_user.username,
-            "full_name": telegram_user.full_name or telegram_user.first_name,
+            "full_name": _build_full_name(telegram_user),
         },
     )
     if not created:
         # Har safar profil ma'lumotlari o'zgargan bo'lishi mumkin (username almashtirish va h.k.)
-        updated = False
+        updated_fields = []
         if user.username != telegram_user.username:
             user.username = telegram_user.username
-            updated = True
-        if updated:
-            user.save(update_fields=["username"])
+            updated_fields.append("username")
+        new_full_name = _build_full_name(telegram_user)
+        if new_full_name != "Foydalanuvchi" and user.full_name != new_full_name:
+            user.full_name = new_full_name
+            updated_fields.append("full_name")
+        if updated_fields:
+            user.save(update_fields=updated_fields)
     return user
 
 

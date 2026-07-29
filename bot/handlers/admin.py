@@ -1,10 +1,9 @@
 """
 Bot ichidagi tezkor Admin Panel. Har bir amal @require_role bilan himoyalangan
-(faqat Admin/Super Admin). Katta hajmdagi amallar (broadcast, backup) Celery
-orqali fon vazifasi sifatida bajariladi.
+(faqat Admin/Super Admin). Broadcast va backup DARHOL bajariladi (Celery talab
+qilinmaydi) — Celery mavjud bo'lsa backup fon vazifasi sifatida ham ishlaydi.
 """
 from django.core.paginator import Paginator
-from django.utils import timezone
 
 from apps.users.models import User, Role
 from apps.groups.models import Group
@@ -158,14 +157,28 @@ def handle_admin_stats(bot, call, user):
 
 @require_role(Role.SUPER_ADMIN)
 def handle_admin_backup(bot, call, user):
-    """Faqat Super Admin — zudlik bilan backup ishga tushiradi (Celery orqali fon vazifasi sifatida)."""
+    """
+    Faqat Super Admin. Avval Celery orqali fon vazifasi sifatida yuborishga urinadi;
+    agar Celery/Redis ishlamasa (odatiy holat — ko'pchilik kichik loyihalarda
+    Celery alohida ishga tushirilmaydi), backup DARHOL, shu yerning o'zida
+    sinxron bajariladi — foydalanuvchi "ishlamayapti" degan taassurotga
+    tushmasligi uchun.
+    """
+    from tasks_celery.backups import run_daily_backup
+
     try:
-        from tasks_celery.backups import run_daily_backup
         run_daily_backup.delay()
         text = "💾 Backup fon vazifasi navbatga qo'yildi (Celery worker orqali bajariladi)."
     except Exception:
-        text = "⚠️ Celery worker ishlamayapti. Backup uchun 'celery -A tasks_celery.celery_app worker' ishga tushirilganini tekshiring."
-    bot.answer_callback_query(call.id, "Backup so'rovi yuborildi.")
+        # Celery/Redis ishlamayapti — funksiyani oddiy Python funksiyasi sifatida,
+        # hech qanday navbatsiz, to'g'ridan-to'g'ri shu yerda bajaramiz.
+        try:
+            run_daily_backup()  # Celery Task obyekti ham oddiy chaqiruvni qo'llab-quvvatlaydi
+            text = "💾 Backup muvaffaqiyatli yaratildi (Celery ishlamagani uchun to'g'ridan-to'g'ri bajarildi)."
+        except Exception as e:  # noqa: BLE001
+            text = f"❌ Backup yaratishda xatolik: {e}"
+
+    bot.answer_callback_query(call.id, "Backup so'rovi qayta ishlandi.")
     bot.edit_message_text(
         text, chat_id=call.message.chat.id, message_id=call.message.message_id,
         reply_markup=admin_menu_kb(),
@@ -192,11 +205,19 @@ def handle_admin_broadcast_text_input(bot, message, user, state_data, clear_stat
     clear_state(user.telegram_id)
 
     from apps.notifications.models import Notification
-    from services.notification_service import enqueue_notification
+    from services.notification_service import send_now_bulk
 
-    targets = User.objects.filter(is_banned=False)
-    for u in targets:
-        enqueue_notification(u, Notification.SYSTEM, f"📢 {text}", scheduled_for=timezone.now())
+    targets = list(User.objects.filter(is_banned=False))
+    bot.send_message(message.chat.id, f"⏳ {len(targets)} foydalanuvchiga yuborilmoqda, biroz kuting...")
+
+    result = send_now_bulk(bot, targets, Notification.SYSTEM, f"📢 {text}")
 
     AdminActionLog.objects.create(actor_telegram_id=user.telegram_id, action="broadcast", details={"text": text})
-    bot.send_message(message.chat.id, f"✅ Xabar {targets.count()} foydalanuvchi uchun navbatga qo'yildi (Celery orqali yuboriladi).")
+    bot.send_message(
+        message.chat.id,
+        f"✅ Broadcast yakunlandi: {result['sent']} ta yetdi"
+        + (f", {result['failed']} tasiga yetmadi" if result['failed'] else "") + ".\n\n"
+        "Eslatma: juda katta (minglab) foydalanuvchi bazasi uchun bu jarayon "
+        "botni vaqtincha bandi qilishi mumkin — bunday holatda Celery-based "
+        "partiyalash tavsiya etiladi.",
+    )

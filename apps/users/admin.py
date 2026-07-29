@@ -12,6 +12,7 @@ class UserRoleInline(admin.TabularInline):
     model = UserRole
     extra = 0
     fk_name = "user"
+    autocomplete_fields = ["group"]
 
 
 @admin.register(User)

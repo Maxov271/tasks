@@ -1,4 +1,5 @@
 """Habits bo'limi — to'liq: yaratish, belgilash, statistika, o'chirish."""
+from datetime import timedelta
 from django.utils import timezone
 
 from apps.tasks.models import Habit, HabitLog
@@ -64,7 +65,7 @@ def handle_habit_stats(bot, call, user):
         text = "Hali odat yo'q."
     else:
         lines = []
-        last_30 = timezone.localdate() - timezone.timedelta(days=30)
+        last_30 = timezone.localdate() - timedelta(days=30)
         for h in habits:
             done_count = HabitLog.objects.filter(habit=h, date__gte=last_30, is_done=True).count()
             lines.append(f"{h.icon_emoji} {h.name}: {progress_bar(done_count, 30)}")

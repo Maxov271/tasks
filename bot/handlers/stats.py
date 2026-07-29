@@ -2,6 +2,7 @@
 Shaxsiy statistika bo'limi. Dashboard'dagi '📈 Statistics' tugmasi shu yerga
 yo'naltiriladi (avvalgi versiyada bu domain butunlay unutilgan edi — endi tuzatildi).
 """
+from datetime import timedelta
 from django.utils import timezone
 
 from telebot import types
@@ -26,7 +27,7 @@ def handle_stats_menu(bot, call, user):
     level_info, _ = UserLevel.objects.get_or_create(user=user)
     streak, _ = Streak.objects.get_or_create(user=user)
 
-    week_ago = timezone.now() - timezone.timedelta(days=7)
+    week_ago = timezone.now() - timedelta(days=7)
     pomodoro_minutes = sum(
         s.duration_minutes for s in PomodoroSession.objects.filter(user=user, started_at__gte=week_ago, is_completed=True)
     )

@@ -3,7 +3,7 @@ Tasks bo'limi — to'liq ishlaydigan modul (menu -> list -> detail -> edit/delet
 """
 from django.core.paginator import Paginator
 from django.utils import timezone
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apps.tasks.models import Task, SubTask, Category
 from services.task_service import complete_task
@@ -189,17 +189,13 @@ def handle_set_deadline_quick(bot, call, user, cb: ParsedCallback, set_state):
     if choice == "today":
         task.deadline = now.replace(hour=23, minute=59, second=0, microsecond=0)
     elif choice == "tomorrow":
-        task.deadline = now.replace(hour=23, minute=59, second=0, microsecond=0) + timezone.timedelta(days=1)
+        task.deadline = now.replace(hour=23, minute=59, second=0, microsecond=0) + timedelta(days=1)
     elif choice == "3d":
-        task.deadline = now.replace(hour=23, minute=59, second=0, microsecond=0) + timezone.timedelta(days=3)
+        task.deadline = now.replace(hour=23, minute=59, second=0, microsecond=0) + timedelta(days=3)
     task.save(update_fields=["deadline"])
 
     bot.answer_callback_query(call.id, "Deadline saqlandi ✅")
-    bot.edit_message_text(
-        f"🎉 '{task.title}' tayyor!\n⏰ Muddat: {task.deadline.strftime('%d.%m.%Y %H:%M')}",
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-    )
+    handle_task_view(bot, call, user, ParsedCallback("task", "view", [task.id]))
 
 
 def handle_custom_deadline_input(bot, message, user, state_data, clear_state):

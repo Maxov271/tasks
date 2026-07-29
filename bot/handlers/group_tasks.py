@@ -97,16 +97,18 @@ def handle_gtask_deadline_input(bot, message, user, state_data, clear_state):
 
     from apps.groups.models import GroupMembership
     from apps.notifications.models import Notification
-    from services.notification_service import enqueue_notification
+    from services.notification_service import send_now_bulk
 
-    members = GroupMembership.objects.filter(group=group, is_active=True, role_in_group=GroupMembership.STUDENT)
-    for m in members:
-        enqueue_notification(
-            m.user, Notification.HOMEWORK,
-            f"📚 Yangi vazifa: '{gtask.title}' ({group.name}). Muddat: {dt.strftime('%d.%m.%Y %H:%M')}",
-            scheduled_for=timezone.now(),
-        )
-    bot.send_message(message.chat.id, f"✅ '{gtask.title}' vazifasi yaratildi va {members.count()} a'zoga xabar berildi.")
+    member_users = [
+        m.user for m in GroupMembership.objects.filter(
+            group=group, is_active=True, role_in_group=GroupMembership.STUDENT
+        ).select_related("user")
+    ]
+    result = send_now_bulk(
+        bot, member_users, Notification.HOMEWORK,
+        f"📚 Yangi vazifa: '{gtask.title}' ({group.name}). Muddat: {dt.strftime('%d.%m.%Y %H:%M')}",
+    )
+    bot.send_message(message.chat.id, f"✅ '{gtask.title}' vazifasi yaratildi va {result['sent']} a'zoga xabar berildi.")
 
 
 # --- Student: topshirish ---
@@ -184,6 +186,24 @@ def handle_gtask_submission_file(bot, message, user, state_data, clear_state):
     status_note = " (⚠️ muddatdan kech topshirildi)" if submission.status == TaskSubmission.LATE else ""
     bot.send_message(message.chat.id, f"✅ '{gtask.title}' topshirildi{status_note}. XP qo'shildi!")
 
+    # SO'RALGAN ASOSIY TUZATISH: guruh egasi va mentorlarga topshirilgani haqida
+    # DARHOL xabar boradi (avvalgi versiyada bu umuman yozilmagan edi).
+    from apps.groups.models import GroupMembership
+    from apps.notifications.models import Notification
+    from services.notification_service import send_now_bulk
+
+    staff_users = {gtask.group.owner}
+    mentor_ids = GroupMembership.objects.filter(
+        group=gtask.group, is_active=True, role_in_group=GroupMembership.MENTOR
+    ).exclude(user=user).values_list("user_id", flat=True)
+    from apps.users.models import User as BotUser
+    staff_users.update(BotUser.objects.filter(id__in=mentor_ids))
+    staff_users.discard(user)  # agar mentor o'zi o'ziga topshirsa, o'ziga xabar yubormaydi
+
+    notify_text = f"📥 {user.display_name} '{gtask.title}' vazifasini topshirdi{status_note}."
+    if staff_users:
+        send_now_bulk(bot, list(staff_users), Notification.SYSTEM, notify_text)
+
 
 # --- Mentor: baholash ---
 
@@ -251,12 +271,11 @@ def handle_gtask_grade_comment_input(bot, message, user, state_data, clear_state
         return
 
     from apps.notifications.models import Notification
-    from services.notification_service import enqueue_notification
+    from services.notification_service import send_now
 
-    enqueue_notification(
-        submission.user, Notification.SYSTEM,
-        f"✅ '{submission.group_task.title}' bahoolandi: {score}/{submission.group_task.max_score}"
+    send_now(
+        bot, submission.user, Notification.SYSTEM,
+        f"✅ '{submission.group_task.title}' baholandi: {score}/{submission.group_task.max_score}"
         + (f"\n💬 {comment}" if comment else ""),
-        scheduled_for=timezone.now(),
     )
     bot.send_message(message.chat.id, "✅ Baholandi va foydalanuvchiga xabar yuborildi.")

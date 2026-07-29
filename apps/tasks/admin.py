@@ -22,6 +22,7 @@ class TaskAdmin(admin.ModelAdmin):
     list_display = ("id", "title", "user", "priority", "deadline", "is_done", "is_overdue")
     list_filter = ("priority", "is_done", "category")
     search_fields = ("title", "user__full_name")
+    autocomplete_fields = ["user", "category"]
     inlines = [SubTaskInline]
 
     @admin.display(boolean=True, description="Muddati o'tganmi")
@@ -46,6 +47,7 @@ class GroupTaskAdmin(admin.ModelAdmin):
     list_display = ("id", "title", "group", "task_type", "deadline", "max_score", "created_by")
     list_filter = ("task_type", "group")
     search_fields = ("title", "group__name")
+    autocomplete_fields = ["group", "created_by"]
     inlines = [TaskSubmissionInline]
 
 

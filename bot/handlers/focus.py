@@ -1,4 +1,5 @@
 """Focus/Pomodoro bo'limi — PomodoroSession modeli asosida."""
+from datetime import timedelta
 from django.utils import timezone
 
 from apps.tasks.models import PomodoroSession
@@ -66,7 +67,7 @@ def handle_focus_today_stats(bot, call, user):
 
 
 def handle_focus_weekly_report(bot, call, user):
-    week_ago = timezone.now() - timezone.timedelta(days=7)
+    week_ago = timezone.now() - timedelta(days=7)
     sessions = PomodoroSession.objects.filter(user=user, started_at__gte=week_ago, is_completed=True)
     total_minutes = sum(s.duration_minutes for s in sessions)
     text = f"📅 Oxirgi 7 kun: {sessions.count()} ta sessiya, jami {total_minutes} daqiqa ({total_minutes // 60} soat)."

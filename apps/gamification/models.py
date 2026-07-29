@@ -1,4 +1,5 @@
 from django.db import models
+from datetime import timedelta
 from django.utils import timezone
 
 
@@ -70,10 +71,10 @@ class Streak(models.Model):
         today = today or timezone.localdate()
         if self.last_active_date == today:
             return  # bugun allaqachon hisoblangan
-        yesterday = today - timezone.timedelta(days=1)
+        yesterday = today - timedelta(days=1)
         if self.last_active_date == yesterday:
             self.current_daily += 1
-        elif self.last_active_date and self.freeze_available and self.last_active_date == yesterday - timezone.timedelta(days=1):
+        elif self.last_active_date and self.freeze_available and self.last_active_date == yesterday - timedelta(days=1):
             # streak freeze — bir kun o'tkazib yuborilgan bo'lsa ham davom ettiriladi
             self.current_daily += 1
             self.freeze_available = False

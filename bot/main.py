@@ -55,7 +55,11 @@ def clear_state(telegram_id):
 @bot.message_handler(commands=["start"])
 def on_start(message):
     log_update("message", message.from_user.id, "/start")
-    dashboard.handle_start(bot, message)
+    try:
+        dashboard.handle_start(bot, message)
+    except Exception as e:  # noqa: BLE001
+        log_error(message.from_user.id, e, context="/start")
+        bot.send_message(message.chat.id, "❌ Xatolik yuz berdi, qayta /start bosing.")
 
 
 # ---------------------------------------------------------------------------
@@ -199,8 +203,14 @@ def on_callback(call):
     log_update("callback", call.from_user.id, call.data)
     cb = parse(call.data)
 
-    from bot.handlers.dashboard import get_or_create_user
-    user = get_or_create_user(call.from_user)
+    try:
+        from bot.handlers.dashboard import get_or_create_user
+        user = get_or_create_user(call.from_user)
+    except Exception as e:  # noqa: BLE001
+        log_error(call.from_user.id, e, context="get_or_create_user")
+        bot.answer_callback_query(call.id, "❌ Xatolik yuz berdi, qayta urinib ko'ring.")
+        return
+
     if user.is_banned:
         bot.answer_callback_query(call.id, "🚫 Siz bloklangansiz.", show_alert=True)
         return
@@ -230,12 +240,31 @@ def on_callback(call):
             bot.answer_callback_query(call.id, "Bu bo'lim hali ishlab chiqilmoqda 🚧")
             return
 
-        bot.answer_callback_query(call.id)
+        # Ko'p handlerlar callback_query'ga o'zlari javob beradi (masalan "✅ Bajarildi"
+        # degan toast bilan). Shu sabab bu yerdagi "yakuniy" javob ixtiyoriy va xavfsiz —
+        # agar Telegram allaqachon javob berilgan callback uchun xato qaytarsa
+        # (masalan eskirgan/qayta javob berilgan so'rov), bu jimgina e'tiborsiz qoldiriladi.
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:  # noqa: BLE001
+            pass
     except PermissionError as e:
         bot.answer_callback_query(call.id, str(e), show_alert=True)
     except Exception as e:  # noqa: BLE001
+        # Telegram'ning "message is not modified" xatosi — bir xil tugmani ketma-ket
+        # ikki marta bosganda yuz beradigan XAVFSIZ holat, foydalanuvchiga xato
+        # ko'rsatish shart emas (shunchaki avvalgi matn/klaviatura bilan bir xil edi).
+        if "message is not modified" in str(e).lower():
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception:  # noqa: BLE001
+                pass
+            return
         log_error(call.from_user.id, e, context=call.data)
-        bot.answer_callback_query(call.id, "❌ Xatolik yuz berdi, qayta urinib ko'ring.")
+        try:
+            bot.answer_callback_query(call.id, "❌ Xatolik yuz berdi, qayta urinib ko'ring.")
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -295,9 +324,9 @@ def on_stateful_text(message):
     handler = TEXT_STATE_HANDLERS.get(state_info["state"])
     if not handler:
         return
-    from bot.handlers.dashboard import get_or_create_user
-    user = get_or_create_user(message.from_user)
     try:
+        from bot.handlers.dashboard import get_or_create_user
+        user = get_or_create_user(message.from_user)
         handler(message, user, state_info["data"])
     except Exception as e:  # noqa: BLE001
         log_error(message.from_user.id, e, context=state_info["state"])
@@ -314,9 +343,9 @@ def on_stateful_text(message):
 ), content_types=["document", "photo", "video", "audio", "voice"])
 def on_submission_file(message):
     state_info = get_state(message.from_user.id)
-    from bot.handlers.dashboard import get_or_create_user
-    user = get_or_create_user(message.from_user)
     try:
+        from bot.handlers.dashboard import get_or_create_user
+        user = get_or_create_user(message.from_user)
         group_tasks.handle_gtask_submission_file(bot, message, user, state_info["data"], clear_state)
     except Exception as e:  # noqa: BLE001
         log_error(message.from_user.id, e, context="gtask_submission_file")

@@ -2,7 +2,54 @@
 
 Mini LMS + CRM + Task Manager + Group Management — Telegram bot (pyTelegramBotAPI) + Django + Django Admin + SQLite3 (PostgreSQL'ga tayyor).
 
-## Loyiha holati (yangilangan)
+## Loyiha holati (3-tur — chuqur kod auditi)
+
+Botni bu muhitda jonli ishga tushira olmasligim sababli (internet yo'q, Django/telebot o'rnatib bo'lmaydi), butun kodni qatorma-qator qo'lda audit qildim va yana bir nechta real muammoni topdim:
+
+- **`timezone.timedelta`** — bir nechta faylda ishlatilgan edi. Bu texnik jihatdan ishlaydi (Django buni ichki import orqali "tasodifan" taqdim etadi), lekin bu rasmiy hujjatlashtirilmagan xatti-harakat. Xavfsizlik uchun barcha joylarda (`stats.py`, `focus.py`, `habits.py`, `tasks.py`, `apps/gamification/models.py`, `tasks_celery/reminders.py`) to'g'ridan-to'g'ri `from datetime import timedelta`ga o'tkazildi.
+- **`answer_callback_query` ikki marta chaqirilishi** — 52 o'ringda handlerlar callback so'roviga o'zi javob berardi ("✅ Bajarildi" kabi toast bilan), so'ng dispatcher yana bir marta avtomatik javob berardi. Bu Telegram API'da nazariy xato xavfini tug'dirardi. Endi dispatcher'ning bu "yakuniy" chaqiruvi xavfsiz (`try/except` bilan) qilindi.
+- **Deadline tez tanlashda "tugagan joy"** — muddatni "Bugun/Ertaga/3 kun" orqali tanlaganingizda, oxirida hech qanday tugma qolmasdi (klaviatura ko'rsatilmasdi) — foydalanuvchi "osilib qolgandek" tuyulardi. Endi bu holатда to'g'ridan-to'g'ri vazifa tafsilotlari sahifasiga (tugmalari bilan) qaytariladi, va tahrirlashda deadline tanlashni majburiy qilmaslik uchun "✅ Deadline'siz saqlash" tugmasi qo'shildi.
+
+
+
+Chuqur tekshiruv natijasida bir nechta **tizim darajasidagi** xatolik topildi va tuzatildi — bular deyarli barcha tugmalarda "xatolik" sifatida namoyon bo'lardi:
+
+### 🔴 Eng muhim xatolik: `telegram_user.full_name` mavjud emas edi
+
+pyTelegramBotAPI kutubxonasining `types.User` klassida `full_name` atributi **umuman yo'q** (bu faqat aiogram kutubxonasiga xos qulaylik funksiyasi). Kodda esa `get_or_create_user()` funksiyasi ichida `telegram_user.full_name` ishlatilgan edi — bu funksiya esa **botning deyarli har bir amalida** (har bir tugma bosilganda, har bir matn kiritilganda) eng birinchi bo'lib chaqiriladi. Natijada:
+
+- `/start` bosilganda dashboard ochilmasligi mumkin edi
+- Har qanday tugma bosilganda "❌ Xatolik yuz berdi" chiqishi mumkin edi
+- **Eng yomoni:** `on_stateful_text` (vazifa nomi, sana, e'lon matni va h.k. kabi barcha matn kiritishlarni qabul qiluvchi funksiya) da bu chaqiruv `try/except` DOIRASINING TASHQARISIDA edi — shuning uchun vazifa nomi yoki sana kiritganingizda bot HECH QANDAY javob bermasdi (xato matni ham chiqmasdi, chunki xatolik ushlanguncha yetib bormasdi). Aynan shu sizning "vazifa nomini kiritganimda xatolik", "sana kiritishda xatolik", "umuman vazifa qo'shishda xatolik" degan xabarlaringizga mos keladi.
+
+**Tuzatildi:** `first_name` + `last_name`dan xavfsiz tarzda to'liq ism yig'iladi, va barcha joylarda `get_or_create_user()` chaqiruvi endi `try/except` ICHIDA.
+
+### 🔴 E'lonlar, xabarnomalar, broadcast, backup — Celery'ga bog'liqligi
+
+Avvalgi versiyada guruh e'lonlari, yangi uyga vazifa haqida xabar, broadcast va h.k. — hammasi faqat `Notification` jadvaliga "pending" holatda yozilardi, haqiqiy yuborish esa **faqat** alohida ishga tushirilgan Celery worker + Redis orqali amalga oshardi. Agar Celery worker ishlamasa (odatiy holat — ko'p test qilishda alohida process ishga tushirilmaydi), bu xabarlar **hech qachon** yuborilmasdi, garchi hech qanday dastur xatosi yuz bermasa ham — shunchaki "jim" turib qolardi.
+
+**Tuzatildi:** Endi quyidagilar Celery'siz, **to'g'ridan-to'g'ri va darhol** yuboriladi:
+- Guruh e'lonlari (barcha faol a'zolarga)
+- Yangi uyga vazifa/topshiriq/imtihon haqida xabar (barcha studentlarga)
+- **Vazifa topshirilganda guruh egasi va mentorlarga xabar** (bu funksiya avvalgi versiyada umuman yozilmagan edi — sizning "gurux egasiga yuborilishi kerak yuborilmayapti" degan xabaringiz to'g'ri edi)
+- Baholash natijasi (studentga)
+- Admin broadcast (barcha foydalanuvchilarga)
+- Backup — avval Celery orqali urinadi, ishlamasa avtomatik ravishda sinxron (to'g'ridan-to'g'ri) bajaradi
+
+Celery/Redis endi faqat chindan ham *kechiktirilishi kerak bo'lgan* narsalar uchun qoladi: deadline eslatmasi (ertaga), faolsizlik eslatmasi, rejalashtirilgan kunlik/haftalik hisobotlar.
+
+### 🟡 "message is not modified" xatosi
+
+Bir xil tugmani ketma-ket ikki marta bossangiz, Telegram API "xabar o'zgartirilmadi" xatosini qaytaradi (chunki matn/klaviatura avvalgisi bilan bir xil). Avval bu "❌ Xatolik yuz berdi" sifatida ko'rsatilardi. Endi bu holat aniqlanib, jim o'tkazib yuboriladi (foydalanuvchiga hech narsa ko'rsatilmaydi, chunki bu xato emas).
+
+### 🟢 Django Admin orqali guruh yaratish va boshqarish kengaytirildi
+
+- Django Admin'da **Group** yaratganingizda, tanlagan "owner" avtomatik ravishda o'sha guruhning **Group Owner** roliga va a'zoligiga ega bo'ladi (avval bu faqat botning o'zi orqali yaratilganda ishlardi).
+- **Announcement** (e'lon) modelida yangi **"📤 Guruh a'zolariga darhol yuborish"** action qo'shildi — Django Admin ichidan ham e'lon yozib, bir tugma bilan guruh a'zolariga yuborish mumkin (Celery shart emas).
+- Ko'plab modellarda `autocomplete_fields` qo'shildi (User, Group, Category, GroupTask) — foydalanuvchi/guruh soni ko'payganda dropdown ro'yxatlar o'rniga qidiruv orqali tez tanlash mumkin.
+- `UserAdmin`da rol tayinlash action'lari (oldingi turda qo'shilgan, ishlab turibdi).
+
+
 
 Barcha 12 ta bot bo'limi endi to'liq ishlaydi: Dashboard, Tasks (yaratish/tahrirlash/o'chirish/subtask/kategoriya/qidiruv), Groups (yaratish/qo'shilish/a'zolar/reyting/sozlamalar/e'lonlar), Group Tasks (uyga vazifa yaratish/topshirish/fayl yuklash/baholash), Habits, Focus/Pomodoro, Achievements, Calendar (kunni bosib o'sha kundagi vazifalarni ko'rish), Notifications, Settings, Statistics, va Admin Panel. "Bu bo'lim hali ishlab chiqilmoqda" degan xabar endi hech qaysi tugmada chiqmasligi kerak — agar chiqsa, bu bug, iltimos xabar bering.
 

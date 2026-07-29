@@ -103,6 +103,7 @@ def deadline_quick_pick_kb(task_id) -> types.InlineKeyboardMarkup:
         types.InlineKeyboardButton("📅 3 kun", callback_data=build("task", "set_deadline", task_id, "3d")),
         types.InlineKeyboardButton("✍️ Sana kiritish", callback_data=build("task", "set_deadline", task_id, "custom")),
     )
+    kb.add(types.InlineKeyboardButton("✅ Deadline'siz saqlash", callback_data=build("task", "view", task_id)))
     return kb
 
 

@@ -1,5 +1,6 @@
 """Deadline/streak/inactivity eslatmalarini yuborish uchun periodik Celery task'lar."""
 from celery import shared_task
+from datetime import timedelta
 from django.utils import timezone
 
 from apps.notifications.models import Notification
@@ -33,8 +34,8 @@ def enqueue_deadline_reminders():
     from apps.tasks.models import Task
     from services.notification_service import enqueue_notification
 
-    window_start = timezone.now() + timezone.timedelta(hours=23)
-    window_end = timezone.now() + timezone.timedelta(hours=25)
+    window_start = timezone.now() + timedelta(hours=23)
+    window_end = timezone.now() + timedelta(hours=25)
     tasks = Task.objects.filter(is_done=False, deadline__range=(window_start, window_end))
 
     for t in tasks:
@@ -51,7 +52,7 @@ def enqueue_inactivity_reminders():
     from apps.users.models import User
     from services.notification_service import enqueue_notification
 
-    threshold = timezone.now() - timezone.timedelta(days=3)
+    threshold = timezone.now() - timedelta(days=3)
     inactive_users = User.objects.filter(is_banned=False, last_active_at__lt=threshold)
 
     for u in inactive_users:

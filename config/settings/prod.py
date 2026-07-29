@@ -4,10 +4,7 @@ from .base import *  # noqa
 
 DEBUG = False
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
-os.environ.setdefault(
-    "DJANGO_SETTINGS_MODULE",
-    "config.settings"
-)
+
 # PostgreSQL'ga o'tish — faqat DATABASE_URL environment o'zgaruvchisini sozlash yetarli,
 # model kodiga hech qanday tegish shart emas.
 DATABASE_URL = os.getenv("DATABASE_URL")
